@@ -1,0 +1,10 @@
+---
+Profiles:
+    Genesis:
+        Orderer:
+            <<: *OrdererDefaults
+            Organizations:
+                - *OrdererOrg
+        Consortiums:
+             SampleConsortium:
+                Organizations:

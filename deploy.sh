@@ -38,8 +38,9 @@ deployKafka() {
     ssh $1 "bash install-kafka.sh"
 }
 
+
 createChannel() {
-    CORE_PEER_MSPCONFIGPATH=`pwd`/crypto-config/peerOrganizations/hrl.ibm.il/users/Admin@hrl.ibm.il/msp CORE_PEER_LOCALMSPID=PeerOrg ./peer channel create $ORDERER_TLS -t 10 -f yacov.tx  -c yacov -o ${orderer}:7050 >&log.txt
+    CORE_PEER_MSPCONFIGPATH=`pwd`/crypto-config/peerOrganizations/$1.hrl.ibm.il/users/Admin@$1.hrl.ibm.il/msp CORE_PEER_LOCALMSPID=$1 ./peer channel create $ORDERER_TLS -t 10 -f yacov.tx  -c yacov -o ${orderer}:7050 >&log.txt
     cat log.txt
 }
 
@@ -124,8 +125,41 @@ for p in $orderer $peers ; do
         cat core.yaml.template | sed "s/PROPAGATEPEERNUM/${PROPAGATEPEERNUM}/ ; s/PEERID/$p/ ; s/ADDRESS/$p/ ; s/ORGLEADER/$orgLeader/ ; s/BOOTSTRAP/$bootPeer:7051/ ; s/TLS_CERT/$p.hrl.ibm.il-cert.pem/" > config-$p/sampleconfig/core.yaml
 done
 
+cat configtx-kafka.yaml.template-pt1  > configtx.yaml
+for org in $orgs; do
+    echo "                - *$org" >> configtx.yaml
+done
+cat << EOF >> configtx.yaml
+    Channels:
+        Consortium: SampleConsortium
+        Application:
+            <<: *ApplicationDefaults
+            Organizations:
+EOF
+for org in $orgs; do
+    echo "                - *$org" >> configtx.yaml
+done
+cat << EOF >> configtx.yaml
+Organizations:
+    - &OrdererOrg
+        Name: OrdererOrg
+        ID: OrdererOrg
+        MSPDir: crypto-config/ordererOrganizations/hrl.ibm.il/msp
+        AdminPrincipal: Role.ADMIN
+
+EOF
+for org in $orgs; do
+    echo "    - &$org" >> configtx.yaml
+    echo "        Name: $org" >> configtx.yaml
+    echo "        ID: $org" >> configtx.yaml
+    echo "        MSPDir: crypto-config/peerOrganizations/$org.hrl.ibm.il/msp" >> configtx.yaml
+    echo "        AdminPrincipal: Role.ADMIN" >> configtx.yaml
+    echo "        AnchorPeers:" >> configtx.yaml
+    echo "            - Host: ${bootPeers[$org]}" >> configtx.yaml
+    echo "              Port: 7051" >> configtx.yaml
+done
 if [ $ordererType = "kafka" ]; then
-    cat configtx-kafka.yaml.template | sed "s/ANCHOR_PEER_IP/anchorpeer/ ; s/ORDERER_IP/$orderer/" > configtx.yaml
+    cat configtx-kafka.yaml.template-pt2 | sed "s/ORDERER_IP/$ip/" >> configtx.yaml
     port=9092
     for  b in $brokers; do
         ip=$(getIP $b)
@@ -135,25 +169,26 @@ if [ $ordererType = "kafka" ]; then
     echo "    Organizations:"  >> configtx.yaml
     echo "Application: &ApplicationDefaults" >> configtx.yaml
     echo "    Organizations:" >> configtx.yaml
-	ip=$(getIP $orderer)
-	cat crypto-config-kafka.yml.template | sed "s/ORDERER_IP/$ip/ ; s/ORDERER_HOSTNAME/$orderer/" > crypto-config.yml
-	for p in $peers ; do
-    	ip=$(getIP $p)
-    	echo "        - Hostname: $p" >> crypto-config.yml
-    	echo "          SANS:" >> crypto-config.yml
-    	echo "            - $ip" >> crypto-config.yml
-	done
+else
+	cat configtx.yaml.template-pt2 | sed "s/ORDERER_IP/$orderer/" > configtx.yaml
+fi
+
+ip=$(getIP $orderer)
+cat crypto-config.yml.template | sed "s/ORDERER_IP/$ip/ ; s/ORDERER_HOSTNAME/$orderer/" > crypto-config.yml
+for org in $orgs ; do
+    echo "  - Name: $org" >> crypto-config.yml
+    echo "    Domain: $org.hrl.ibm.il" >> crypto-config.yml
+    echo "    Specs:" >> crypto-config.yml
+    ps=${peerOrgs[$org]}
+    for p in $ps ; do
+        ip=$(getIP $p)
+        echo "        - Hostname: $p" >> crypto-config.yml
+        echo "          SANS:" >> crypto-config.yml
+        echo "            - $ip" >> crypto-config.yml
+    done
     echo "    Users:" >> crypto-config.yml
     echo "      Count: 1" >> crypto-config.yml
-else
-	cat configtx.yaml.template | sed "s/ANCHOR_PEER_IP/anchorpeer/ ; s/ORDERER_IP/$orderer/" > configtx.yaml
-    cat crypto-config.yml.template | sed "s/ORDERER_IP/$orderer/" > crypto-config.yml
-    for p in $peers ; do
-        echo "        - Hostname: $p" >> crypto-config.yml
-    done
-	echo "    Users:" >> crypto-config.yml
-	echo "      Count: 1" >> crypto-config.yml
-fi
+done
 
 ./cryptogen generate --config crypto-config.yml
 ./configtxgen -profile Genesis -outputBlock genesis.block  -channelID system
