@@ -96,7 +96,8 @@ peer:
         # Number of times a message is pushed to remote peers
         propagateIterations: 1
         # Number of peers selected to push messages to
-        propagatePeerNum: PROPAGATEPEERNUM
+        #propagatePeerNum: PROPAGATEPEERNUM
+        propagatePeerNum: 3
         # Determines frequency of pull phases(unit: second)
         pullInterval: 4s
         # Number of peers to pull from
@@ -133,7 +134,7 @@ peer:
         reconnectInterval: 25s
         # This is an endpoint that is published to peers outside of the organization.
         # If this isn't set, the peer will not be known to other organizations.
-        externalEndpoint:
+        externalEndpoint: EXTENDPNT
         # Leader election service configuration
         election:
             # Longest time peer wait for stable membership during leader election startup (unit: second)
@@ -203,7 +204,7 @@ peer:
     # to match the name of one of the MSPs in each of the channel
     # that this peer is a member of. Otherwise this peer's messages
     # will not be identified as valid by other nodes.
-    localMspId: PeerOrg
+    localMspId: MSPID
 
     # Used with Go profiling tools only in none production environment. In
     # production, it should be disabled (eg enabled: false)

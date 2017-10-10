@@ -45,11 +45,11 @@ createChannel() {
 }
 
 query() {
-    CORE_PEER_LOCALMSPID=PeerOrg CORE_PEER_MSPCONFIGPATH=`pwd`/crypto-config/peerOrganizations/hrl.ibm.il/users/Admin@hrl.ibm.il/msp/ CORE_PEER_ADDRESS=$1:7051 ./peer chaincode query -c '{"Args":["query","a"]}' -C yacov -n exampleCC -v 1.0  --tls true --cafile `pwd`/crypto-config/ordererOrganizations/hrl.ibm.il/orderers/${orderer}.hrl.ibm.il/tls/ca.crt
+    CORE_PEER_LOCALMSPID=$1 CORE_PEER_MSPCONFIGPATH=`pwd`/crypto-config/peerOrganizations/$1.hrl.ibm.il/users/Admin@$1.hrl.ibm.il/msp/ CORE_PEER_ADDRESS=$2:7051 ./peer chaincode query -c '{"Args":["query","a"]}' -C yacov -n exampleCC -v 1.0  --tls true --cafile `pwd`/crypto-config/ordererOrganizations/hrl.ibm.il/orderers/${orderer}.hrl.ibm.il/tls/ca.crt
 }
 
 invoke() {
-        CORE_PEER_LOCALMSPID=PeerOrg CORE_PEER_MSPCONFIGPATH=`pwd`/crypto-config/peerOrganizations/hrl.ibm.il/users/Admin@hrl.ibm.il/msp/ CORE_PEER_ADDRESS=$1:7051 ./peer chaincode invoke -c '{"Args":["invoke","a","b","10"]}' -C yacov -n exampleCC -v 1.0  --tls true --cafile `pwd`/crypto-config/ordererOrganizations/hrl.ibm.il/orderers/${orderer}.hrl.ibm.il/tls/ca.crt
+        CORE_PEER_LOCALMSPID=$1 CORE_PEER_MSPCONFIGPATH=`pwd`/crypto-config/peerOrganizations/$1.hrl.ibm.il/users/Admin@$1.hrl.ibm.il/msp/ CORE_PEER_ADDRESS=$2:7051 ./peer chaincode invoke -c '{"Args":["invoke","a","b","10"]}' -C yacov -n exampleCC -v 1.0  --tls true --cafile `pwd`/crypto-config/ordererOrganizations/hrl.ibm.il/orderers/${orderer}.hrl.ibm.il/tls/ca.crt
 }
 
 [[ -z $GOPATH ]] && (echo "Environment variable GOPATH isn't set!"; exit 1)
@@ -105,27 +105,40 @@ done
 echo "Preparing configuration..."
 rm -rf crypto-config
 for p in $orderer $peers ; do
-	rm -rf $p
+	rm -rf config-*
 done
-bootPeer=$(echo ${peers} | awk '{print $1}')
 
-PROPAGATEPEERNUM=${PROPAGATEPEERNUM:-3}
-i=0
+declare -A bootPeers=()
+for org in $orgs ; do
+    ps=${peerOrgs[$org]}
+    bootPeer=$(echo ${ps} | awk '{print $1}')
+    bootPeers+=(["$org"]="$bootPeer")
+done
+for org in $orgs; do
+    printf '%s - %s\n' "$org" "${bootPeers[$org]}"
+done
+
 for p in $orderer $peers ; do
-        mkdir -p config-$p/sampleconfig/crypto
+		mkdir -p config-$p/sampleconfig/crypto
         mkdir -p config-$p/sampleconfig/tls
         ip=$(getIP $p)
         echo "${p}'s ip address is ${ip}"
-        orgLeader=false
-        bootstrap=anchorPeer:7051
-        if [[ $i -eq 1 ]];then
+done
+
+for org in $orgs ; do
+    ps=${peerOrgs[$org]}
+	for p in $ps ; do
+	     orgLeader=false
+        if [[ $i -eq 0 ]];then
                 orgLeader=true
         fi
         (( i += 1 ))
-        cat core.yaml.template | sed "s/PROPAGATEPEERNUM/${PROPAGATEPEERNUM}/ ; s/PEERID/$p/ ; s/ADDRESS/$p/ ; s/ORGLEADER/$orgLeader/ ; s/BOOTSTRAP/$bootPeer:7051/ ; s/TLS_CERT/$p.hrl.ibm.il-cert.pem/" > config-$p/sampleconfig/core.yaml
+        echo $org
+    	cat core.yaml.template | sed "s/MSPID/$org/ ; s/PEERID/$p/ ; s/ADDRESS/$p/ ; s/ORGLEADER/$orgLeader/ ; s/BOOTSTRAP/${bootPeers[$org]}:7051/ ; s/TLS_CERT/$p.hrl.ibm.il-cert.pem/ ; s/EXTENDPNT/$orgLeader/" > config-$p/sampleconfig/core.yaml
+	done
 done
 
-cat configtx-kafka.yaml.template-pt1  > configtx.yaml
+cat configtx.yaml.template-pt1  > configtx.yaml
 for org in $orgs; do
     echo "                - *$org" >> configtx.yaml
 done
@@ -163,14 +176,14 @@ if [ $ordererType = "kafka" ]; then
     port=9092
     for  b in $brokers; do
         ip=$(getIP $b)
-        echo "       - $ip:$port" >> configtx.yaml
+        echo "         - $ip:$port" >> configtx.yaml
         (( port += 1 ))
     done
     echo "    Organizations:"  >> configtx.yaml
     echo "Application: &ApplicationDefaults" >> configtx.yaml
     echo "    Organizations:" >> configtx.yaml
 else
-	cat configtx.yaml.template-pt2 | sed "s/ORDERER_IP/$orderer/" > configtx.yaml
+	cat configtx-solo.yaml.template-pt2 | sed "s/ORDERER_IP/$orderer/" >> configtx.yaml
 fi
 
 ip=$(getIP $orderer)
@@ -196,18 +209,22 @@ done
 
 
 ORDERER_TLS="--tls true --cafile `pwd`/crypto-config/ordererOrganizations/hrl.ibm.il/orderers/${orderer}.hrl.ibm.il/tls/ca.crt"
-export CORE_PEER_TLS_ROOTCERT_FILE=`pwd`/crypto-config/peerOrganizations/hrl.ibm.il/peers/${bootPeer}.hrl.ibm.il/tls/ca.crt
+export CORE_PEER_TLS_ROOTCERT_FILE=`pwd`/crypto-config/peerOrganizations/${orgs%% *}.hrl.ibm.il/peers/${bootPeers[${orgs%% *}]}.${orgs%% *}.hrl.ibm.il/tls/ca.crt
 export CORE_PEER_TLS_ENABLED=true
 
 mv genesis.block config-$orderer/sampleconfig/
 cp orderer.yaml config-$orderer/sampleconfig/
 
 cp -r crypto-config/ordererOrganizations/hrl.ibm.il/orderers/${orderer}.hrl.ibm.il/msp/* config-$orderer/sampleconfig/crypto
-for p in $peers ; do
-        cp -r crypto-config/peerOrganizations/hrl.ibm.il/peers/$p.hrl.ibm.il/msp/* config-$p/sampleconfig/crypto
-        cp -r crypto-config/peerOrganizations/hrl.ibm.il/peers/$p.hrl.ibm.il/tls/* config-$p/sampleconfig/tls/
-done
 cp -r crypto-config/ordererOrganizations/hrl.ibm.il/orderers/${orderer}.hrl.ibm.il/tls/* config-$orderer/sampleconfig/tls
+for org in $orgs ; do
+    ps=${peerOrgs[$org]}
+    for p in $ps ; do
+        cp -r crypto-config/peerOrganizations/$org.hrl.ibm.il/peers/$p.$org.hrl.ibm.il/msp/* config-$p/sampleconfig/crypto
+        cp -r crypto-config/peerOrganizations/$org.hrl.ibm.il/peers/$p.$org.hrl.ibm.il/tls/* config-$p/sampleconfig/tls/
+    done
+done
+
 if [ $ordererType = "kafka" ]; then
 	connect=""
 	for n in $ensamble; do
@@ -229,7 +246,7 @@ for p in $orderer $peers ; do
         ssh $p "pkill orderer; pkill peer" || echo ""
         ssh $p "rm -rf /var/hyperledger/production/*"
         ssh $p "rm -rf /opt/gopath/src/github.com/hyperledger/fabric/sampleconfig/*"
-        ssh $p "cd /opt/gopath/src/github.com/hyperledger/fabric ; git reset HEAD --hard && git pull"
+        ssh $p "rm -rf /opt/gopath/src/github.com/hyperledger/fabric/sampleconfig/*"
         scp -r config-$p/sampleconfig/* $p:/opt/gopath/src/github.com/hyperledger/fabric/sampleconfig/
 done
 
@@ -310,48 +327,69 @@ done
 
 sleep 20
 echo "Creating channel"
-createChannel
+createChannel ${orgs%% *}
 
 echo "Joining peers to channel"
-for p in $peers ; do
-    CORE_PEER_LOCALMSPID=PeerOrg CORE_PEER_MSPCONFIGPATH=`pwd`/crypto-config/peerOrganizations/hrl.ibm.il/users/Admin@hrl.ibm.il/msp/ CORE_PEER_ADDRESS=$p:7051 ./peer channel join -b yacov.block
+for org in $orgs ; do
+    ps=${peerOrgs[$org]}
+    export CORE_PEER_TLS_ROOTCERT_FILE=`pwd`/crypto-config/peerOrganizations/$org.hrl.ibm.il/peers/${bootPeers[${org}]}.$org.hrl.ibm.il/tls/ca.crt
+    for p in $ps ; do
+        echo "Peer $p of organization $org joining the channel..."
+        CORE_PEER_LOCALMSPID=$org CORE_PEER_MSPCONFIGPATH=`pwd`/crypto-config/peerOrganizations/$org.hrl.ibm.il/users/Admin@$org.hrl.ibm.il/msp/ CORE_PEER_ADDRESS=$p:7051 ./peer channel join -b yacov.block
+    done
 done
 
-
-for p in $peers ; do
-	echo -n "Installing chaincode on $p..."
-    CORE_PEER_LOCALMSPID=PeerOrg CORE_PEER_MSPCONFIGPATH=`pwd`/crypto-config/peerOrganizations/hrl.ibm.il/users/Admin@hrl.ibm.il/msp/ CORE_PEER_ADDRESS=$p:7051 ./peer chaincode install -p github.com/hyperledger/fabric/examples/chaincode/go/chaincode_example02 -n exampleCC -v 1.0
-	echo ""
+for org in $orgs; do
+    export CORE_PEER_TLS_ROOTCERT_FILE=`pwd`/crypto-config/peerOrganizations/$org.hrl.ibm.il/peers/${bootPeers[${org}]}.$org.hrl.ibm.il/tls/ca.crt
+    ps=${peerOrgs[$org]}
+    for p in $ps ; do
+        echo -n "Installing chaincode on $p..."
+        CORE_PEER_LOCALMSPID=$org CORE_PEER_MSPCONFIGPATH=`pwd`/crypto-config/peerOrganizations/$org.hrl.ibm.il/users/Admin@$org.hrl.ibm.il/msp/ CORE_PEER_ADDRESS=$p:7051 ./peer chaincode install -p github.com/hyperledger/fabric/examples/chaincode/go/chaincode_example02 -n exampleCC -v 1.0
+        echo ""
+    done
 done
 
-
-echo "Instantiating chaincode..."
-CORE_PEER_TLS_ROOTCERT_FILE=`pwd`/crypto-config/peerOrganizations/hrl.ibm.il/peers/${bootPeer}.hrl.ibm.il/tls/ca.crt CORE_PEER_LOCALMSPID=PeerOrg CORE_PEER_MSPCONFIGPATH=`pwd`/crypto-config/peerOrganizations/hrl.ibm.il/users/Admin@hrl.ibm.il/msp/ CORE_PEER_ADDRESS=${bootPeer}:7051 ./peer chaincode instantiate -n exampleCC -v 1.0 -C yacov -c '{"Args":["init","a","100","b","200"]}' -o ${orderer}:7050 --tls true --cafile `pwd`/crypto-config/ordererOrganizations/hrl.ibm.il/orderers/${orderer}.hrl.ibm.il/tls/ca.crt
+org=${orgs%% *}
+peer=${bootPeers[${org}]}
+echo "Instantiating chaincode on $peer of $org"
+export CORE_PEER_TLS_ROOTCERT_FILE=`pwd`/crypto-config/peerOrganizations/$org.hrl.ibm.il/peers/${bootPeers[${org}]}.$org.hrl.ibm.il/tls/ca.crt
+CORE_PEER_TLS_ROOTCERT_FILE=`pwd`/crypto-config/peerOrganizations/$org.hrl.ibm.il/peers/$peer.$org.hrl.ibm.il/tls/ca.crt CORE_PEER_LOCALMSPID=$org CORE_PEER_MSPCONFIGPATH=`pwd`/crypto-config/peerOrganizations/$org.hrl.ibm.il/users/Admin@$org.hrl.ibm.il/msp/ CORE_PEER_ADDRESS=$peer:7051 ./peer chaincode instantiate -n exampleCC -v 1.0 -C yacov -c '{"Args":["init","a","100","b","200"]}' -o ${orderer}:7050 --tls true --cafile `pwd`/crypto-config/ordererOrganizations/hrl.ibm.il/orderers/${orderer}.hrl.ibm.il/tls/ca.crt
 
 sleep 10
 
 echo "Invoking chaincode..."
-for p in $peers ; do
-	query $p
-done
 
-for i in `seq 5`; do
-        invoke ${bootPeer}
-done
-
-echo "Waiting for peers $peers to sync..."
-t1=`date +%s`
-while :; do
-	allInSync=true
-	for p in $peers ; do
-	    echo "Querying $p..."
-	    query $p | grep -q 'Query Result: 50'
-	    if [[ $? -ne 0 ]];then
-		    allInSync=false
-	    fi
+for org in $orgs; do
+    export CORE_PEER_TLS_ROOTCERT_FILE=`pwd`/crypto-config/peerOrganizations/$org.hrl.ibm.il/peers/${bootPeers[${org}]}.$org.hrl.ibm.il/tls/ca.crt
+    ps=${peerOrgs[$org]}
+	for p in $ps; do
+    		invoke $org $p
 	done
-	if [ "${allInSync}" == "true" ];then
-		echo Sync took $(( $(date +%s) - $t1 ))s
-		break
-	fi
 done
+
+for org in $orgs; do
+    export CORE_PEER_TLS_ROOTCERT_FILE=`pwd`/crypto-config/peerOrganizations/$org.hrl.ibm.il/peers/${bootPeers[${org}]}.$org.hrl.ibm.il/tls/ca.crt
+    ps=${peerOrgs[$org]}
+    for p in $ps; do
+        query $org $p
+    done
+done
+
+
+
+#echo "Waiting for peers $peers to sync..."
+#t1=`date +%s`
+#while :; do
+#	allInSync=true
+#	for p in $peers ; do
+#	    echo "Querying $p..."
+#	    query $p | grep -q 'Query Result: 50'
+#	    if [[ $? -ne 0 ]];then
+#		    allInSync=false
+#	    fi
+#	done
+#	if [ "${allInSync}" == "true" ];then
+#		echo Sync took $(( $(date +%s) - $t1 ))s
+#		break
+#	fi
+#done
