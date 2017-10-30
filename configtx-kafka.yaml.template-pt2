@@ -2,7 +2,7 @@ Orderer: &OrdererDefaults
     OrdererType: kafka
     Addresses:
         - ORDERER_IP:7050
-    BatchTimeout: 10s
+    BatchTimeout: 1ms
     BatchSize:
         MaxMessageCount: 512
         AbsoluteMaxBytes: 98 MB

@@ -114,10 +114,10 @@ for org in $orgs ; do
     bootPeer=$(echo ${ps} | awk '{print $1}')
     bootPeers+=(["$org"]="$bootPeer")
 done
+echo "Boot Peers: "
 for org in $orgs; do
     printf '%s - %s\n' "$org" "${bootPeers[$org]}"
 done
-
 for p in $orderer $peers ; do
 		mkdir -p config-$p/sampleconfig/crypto
         mkdir -p config-$p/sampleconfig/tls
@@ -126,6 +126,7 @@ for p in $orderer $peers ; do
 done
 
 for org in $orgs ; do
+	i=0
     ps=${peerOrgs[$org]}
 	for p in $ps ; do
 	     orgLeader=false
@@ -134,7 +135,8 @@ for org in $orgs ; do
         fi
         (( i += 1 ))
         echo $org
-    	cat core.yaml.template | sed "s/MSPID/$org/ ; s/PEERID/$p/ ; s/ADDRESS/$p/ ; s/ORGLEADER/$orgLeader/ ; s/BOOTSTRAP/${bootPeers[$org]}:7051/ ; s/TLS_CERT/$p.hrl.ibm.il-cert.pem/ ; s/EXTENDPNT/$orgLeader/" > config-$p/sampleconfig/core.yaml
+		ip=$(getIP $p)
+    	cat core.yaml.template | sed "s/MSPID/$org/ ; s/PEERID/$p/ ; s/ADDRESS/$ip/ ; s/ORGLEADER/$orgLeader/ ; s/BOOTSTRAP/${bootPeers[$org]}:7051/ ; s/TLS_CERT/$p.hrl.ibm.il-cert.pem/ ; s/EXTENDPNT/${bootPeers[$org]}/" > config-$p/sampleconfig/core.yaml
 	done
 done
 
@@ -306,7 +308,7 @@ echo "Starting orderer"
 ssh $orderer " . ~/.profile; cd /opt/gopath/src/github.com/hyperledger/fabric ;  echo './build/bin/orderer &> orderer.out &' > start.sh; bash start.sh "
 for p in $peers ; do
         echo "Starting peer $p"
-	ssh $p " . ~/.profile; cd /opt/gopath/src/github.com/hyperledger/fabric ;  echo './build/bin/peer node start &> $p.out &' > start.sh; bash start.sh "
+	ssh $p " . ~/.profile; cd /opt/gopath/src/github.com/hyperledger/fabric ;  echo './build/bin/peer node start --logging-level debug &> $p.out &' > start.sh; bash start.sh "
 done
 
 echo "waiting for orderer and peers to be online"
@@ -325,7 +327,7 @@ while :; do
 	sleep 5
 done
 
-sleep 20
+sleep 10
 echo "Creating channel"
 createChannel ${orgs%% *}
 
@@ -339,15 +341,17 @@ for org in $orgs ; do
     done
 done
 
+
 for org in $orgs; do
     export CORE_PEER_TLS_ROOTCERT_FILE=`pwd`/crypto-config/peerOrganizations/$org.hrl.ibm.il/peers/${bootPeers[${org}]}.$org.hrl.ibm.il/tls/ca.crt
     ps=${peerOrgs[$org]}
     for p in $ps ; do
-        echo -n "Installing chaincode on $p..."
+        echo -n "Installing chaincode on $p of $org..."
         CORE_PEER_LOCALMSPID=$org CORE_PEER_MSPCONFIGPATH=`pwd`/crypto-config/peerOrganizations/$org.hrl.ibm.il/users/Admin@$org.hrl.ibm.il/msp/ CORE_PEER_ADDRESS=$p:7051 ./peer chaincode install -p github.com/hyperledger/fabric/examples/chaincode/go/chaincode_example02 -n exampleCC -v 1.0
         echo ""
     done
 done
+
 
 org=${orgs%% *}
 peer=${bootPeers[${org}]}
@@ -357,13 +361,13 @@ CORE_PEER_TLS_ROOTCERT_FILE=`pwd`/crypto-config/peerOrganizations/$org.hrl.ibm.i
 
 sleep 10
 
-echo "Invoking chaincode..."
 
 for org in $orgs; do
     export CORE_PEER_TLS_ROOTCERT_FILE=`pwd`/crypto-config/peerOrganizations/$org.hrl.ibm.il/peers/${bootPeers[${org}]}.$org.hrl.ibm.il/tls/ca.crt
     ps=${peerOrgs[$org]}
 	for p in $ps; do
-    		invoke $org $p
+		echo "Invoking chaincode from $p of $org" 
+   		invoke $org $p
 	done
 done
 
